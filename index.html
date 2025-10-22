@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Information for AES Corporation</title>
+    <style>
+        :root {
+            --bg-color: #f0f2f5;
+            --card-bg: #ffffff;
+            --text-color: #333;
+            --header-color: #1a2c4e;
+            --accent-max: #28a745;
+            --accent-min: #dc3545;
+            --shadow: 0 4px 8px rgba(0,0,0,0.1);
+            --border-radius: 8px;
+        }
+        html {
+            box-sizing: border-box;
+        }
+        *, *:before, *:after {
+            box-sizing: inherit;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 2rem;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+        }
+        main {
+            width: 100%;
+            max-width: 900px;
+            text-align: center;
+        }
+        h1 {
+            color: var(--header-color);
+            margin-bottom: 2rem;
+            font-size: 2.5rem;
+            font-weight: 600;
+            word-wrap: break-word;
+        }
+        .card-container {
+            display: flex;
+            gap: 2rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .card {
+            background-color: var(--card-bg);
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            padding: 2rem;
+            width: 300px;
+            flex-grow: 1;
+            border-top: 5px solid;
+            transition: transform 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+        }
+        .card.max-card {
+            border-color: var(--accent-max);
+        }
+        .card.min-card {
+            border-color: var(--accent-min);
+        }
+        .card h2 {
+            margin-top: 0;
+            font-size: 1.25rem;
+            color: var(--header-color);
+        }
+        .card .value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin: 1rem 0;
+            word-wrap: break-word;
+        }
+        .max-card .value {
+            color: var(--accent-max);
+        }
+        .min-card .value {
+            color: var(--accent-min);
+        }
+        .card .year {
+            font-size: 1rem;
+            color: #666;
+        }
+        #status-message {
+            margin-top: 2rem;
+            font-style: italic;
+            color: #555;
+            height: 1.2em; /* Reserve space to prevent layout shift */
+        }
+        footer {
+            margin-top: 3rem;
+            font-size: 0.9rem;
+            color: #777;
+        }
+        footer a {
+            color: var(--header-color);
+            text-decoration: none;
+        }
+        footer a:hover {
+            text-decoration: underline;
+        }
+        @media (max-width: 768px) {
+            body {
+                padding: 1rem;
+            }
+            h1 {
+                font-size: 2rem;
+            }
+            .card-container {
+                flex-direction: column;
+                gap: 1.5rem;
+                align-items: center;
+            }
+            .card {
+                width: 100%;
+                max-width: 400px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <h1 id="share-entity-name">AES Corporation</h1>
+        <div class="card-container">
+            <div class="card max-card">
+                <h2>Highest Shares Outstanding (since 2021)</h2>
+                <p class="value" id="share-max-value">703,000,000</p>
+                <p class="year">Fiscal Year: <span id="share-max-fy">2022</span></p>
+            </div>
+            <div class="card min-card">
+                <h2>Lowest Shares Outstanding (since 2021)</h2>
+                <p class="value" id="share-min-value">669,000,000</p>
+                <p class="year">Fiscal Year: <span id="share-min-fy">2021</span></p>
+            </div>
+        </div>
+        <div id="status-message"></div>
+    </main>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const defaultCik = '0000874761';
+            let targetCik = defaultCik;
+
+            try {
+                const urlParams = new URLSearchParams(window.location.search);
+                const cikFromQuery = urlParams.get('CIK');
+
+                if (cikFromQuery && /^\d{1,10}$/.test(cikFromQuery)) {
+                    targetCik = cikFromQuery.padStart(10, '0');
+                }
+            } catch (e) {
+                console.error("Could not parse URL parameters:", e);
+            }
+            
+            fetchAndDisplayData(targetCik);
+        });
+
+        async function fetchAndDisplayData(cik) {
+            updateStatus(`Fetching data for CIK: ${cik}...`);
+            
+            const secApiUrl = `https://data.sec.gov/api/xbrl/companyconcept/CIK${cik}/dei/EntityCommonStockSharesOutstanding.json`;
+            const isDefaultCik = cik === '0000874761';
+            
+            // Per brief, use proxy for non-default CIKs. The SEC API has CORS enabled, so direct fetch would also work.
+            const fetchUrl = isDefaultCik ? secApiUrl : `https://api.allorigins.win/raw?url=${encodeURIComponent(secApiUrl)}`;
+
+            try {
+                // Per SEC guidance: "Your request must set a custom User-Agent string that identifies your application."
+                // This is not possible in client-side JavaScript as User-Agent is a forbidden header name.
+                // This request will be sent with the browser's default User-Agent. A proxy might alter it.
+                const response = await fetch(fetchUrl);
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`Failed to fetch data from SEC API. Status: ${response.status}. Response: ${errorText}`);
+                }
+
+                const data = await response.json();
+                const processedData = processSecData(data);
+
+                if (processedData) {
+                    updateDOM(processedData);
+                    updateStatus('');
+                } else {
+                    throw new Error('No valid share data found for fiscal years after 2020.');
+                }
+
+            } catch (error) {
+                console.error('Error fetching or processing data:', error);
+                updateStatus(`Error: ${error.message}`);
+                resetToErrorState(cik);
+            }
+        }
+
+        function processSecData(data) {
+            if (!data || !data.units || !data.units.shares) {
+                return null;
+            }
+
+            const filteredShares = data.units.shares.filter(item => 
+                item.fy > 2020 && typeof item.val === 'number' && item.form.includes('K') // Prefer annual reports
+            );
+
+            if (filteredShares.length === 0) {
+                 // Fallback to any form type if no 10-K/20-F found
+                 const broaderFilter = data.units.shares.filter(item => 
+                    item.fy > 2020 && typeof item.val === 'number'
+                 );
+                 if (broaderFilter.length > 0) {
+                     return findMinMax(broaderFilter, data.entityName);
+                 }
+                 return null;
+            }
+            
+            return findMinMax(filteredShares, data.entityName);
+        }
+
+        function findMinMax(shares, entityName) {
+            let maxShare = shares[0];
+            let minShare = shares[0];
+
+            for (const share of shares) {
+                if (share.val > maxShare.val) maxShare = share;
+                if (share.val < minShare.val) minShare = share;
+            }
+            
+            return {
+                entityName: toTitleCase(entityName || 'Unknown Company'),
+                max: { val: maxShare.val, fy: String(maxShare.fy) },
+                min: { val: minShare.val, fy: String(minShare.fy) }
+            };
+        }
+
+
+        function updateDOM(data) {
+            const { entityName, max, min } = data;
+            
+            document.title = `Stock Information for ${entityName}`;
+            document.getElementById('share-entity-name').textContent = entityName;
+
+            document.getElementById('share-max-value').textContent = max.val.toLocaleString();
+            document.getElementById('share-max-fy').textContent = max.fy;
+
+            document.getElementById('share-min-value').textContent = min.val.toLocaleString();
+            document.getElementById('share-min-fy').textContent = min.fy;
+        }
+
+        function updateStatus(message) {
+            document.getElementById('status-message').textContent = message;
+        }
+
+        function resetToErrorState(cik) {
+            const errorMsg = 'Data not available';
+            document.title = 'Error';
+            document.getElementById('share-entity-name').textContent = `Could not load data for CIK ${cik}`;
+            document.getElementById('share-max-value').textContent = errorMsg;
+            document.getElementById('share-max-fy').textContent = 'N/A';
+            document.getElementById('share-min-value').textContent = errorMsg;
+            document.getElementById('share-min-fy').textContent = 'N/A';
+        }
+
+        function toTitleCase(str) {
+            return str.replace(/\w\S*/g, (txt) => {
+                const firstChar = txt.charAt(0).toUpperCase();
+                const rest = txt.substr(1).toLowerCase();
+                // Preserve acronyms like 'LLC' or 'CORP' if they are common
+                if (rest.length <= 2 && /^[A-Z]+$/.test(txt)) {
+                    return txt;
+                }
+                return firstChar + rest;
+            });
+        }
+    </script>
+</body>
+</html>
